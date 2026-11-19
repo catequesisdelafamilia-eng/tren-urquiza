@@ -39,6 +39,24 @@ function obtenerDiaOperacionActual(): 'HABILES' | 'SABADOS' | 'DOMINGOS' {
   return 'HABILES';
 }
 
+function esCabeceraOrden(orden: number): boolean {
+  return orden === 1 || orden === 23;
+}
+
+function calcularMinutosReales(estacion: Estacion, sentido: 'Lemos' | 'Lacroze'): number {
+  const base = sentido === 'Lemos' ? estacion.min_desde_lacroze : estacion.min_desde_lemos;
+  return esCabeceraOrden(estacion.orden) ? base : base + 2;
+}
+
+function calcularTiempoViajeReal(origen: Estacion, destino: Estacion, sentido: 'Lemos' | 'Lacroze'): number {
+  const offsetOrg = calcularMinutosReales(origen, sentido);
+  const offsetDst = calcularMinutosReales(destino, sentido);
+  const diffAjustada = Math.abs(offsetDst - offsetOrg);
+
+  const esCabeceraACabecera = esCabeceraOrden(origen.orden) && esCabeceraOrden(destino.orden);
+  return esCabeceraACabecera ? diffAjustada + 2 : diffAjustada;
+}
+
 export default function AppTrenUrquiza() {
   const [estaciones, setEstaciones] = useState<Estacion[]>([]);
   const [origenId, setOrigenId] = useState<number>(() => Number(localStorage.getItem('urquiza_origen')) || 23);
@@ -48,7 +66,7 @@ export default function AppTrenUrquiza() {
   const [proximosTrenes, setProximosTrenes] = useState<ProximoServicio[]>([]);
   const [cargando, setCargando] = useState<boolean>(true);
   
-  const [horaFranja, setHoraFranja] = useState<string>(''); // Ej: '17' para la franja de 17:00 a 17:59
+  const [horaFranja, setHoraFranja] = useState<string>('');
   
   const [estadoWeb, setEstadoWeb] = useState({ 
     estadoNormal: true, 
@@ -120,7 +138,6 @@ export default function AppTrenUrquiza() {
     cargarSalidas();
   }, [sentidoActual, diaOperacion, estaciones]);
 
-  // Cálculo de horarios filtrando estrictamente por la franja horaria seleccionada
   useEffect(() => {
     if (!estacionOrigen || !estacionDestino || estacionOrigen.id === estacionDestino.id) {
       setProximosTrenes([]);
@@ -133,15 +150,14 @@ export default function AppTrenUrquiza() {
       const demoraTotal = estadoWeb.minutosRetraso;
       const estaRetrasado = !estadoWeb.estadoNormal || demoraTotal > 3;
 
-      const offsetOrigen = sentidoActual === 'Lemos' ? estacionOrigen!.min_desde_lacroze : estacionOrigen!.min_desde_lemos;
-      const offsetDestino = sentidoActual === 'Lemos' ? estacionDestino!.min_desde_lacroze : estacionDestino!.min_desde_lemos;
-      const tiempoViaje = Math.abs(offsetDestino - offsetOrigen);
+      const offsetOrigen = calcularMinutosReales(estacionOrigen!, sentidoActual);
+      const tiempoViaje = calcularTiempoViajeReal(estacionOrigen!, estacionDestino!, sentidoActual);
 
       const todosCalculados: ProximoServicio[] = salidas.map(s => {
         const [h, m] = s.hora_salida.split(':').map(Number);
         const minSalidaCabecera = h * 60 + m;
         const minPasoOrigen = minSalidaCabecera + offsetOrigen + demoraTotal;
-        const minLlegadaDestino = minSalidaCabecera + offsetDestino + demoraTotal;
+        const minLlegadaDestino = minPasoOrigen + tiempoViaje;
 
         const formatearHora = (totalMin: number) => {
           const horas = Math.floor((totalMin / 60) % 24).toString().padStart(2, '0');
@@ -164,7 +180,6 @@ export default function AppTrenUrquiza() {
       let filtrados: ProximoServicio[] = [];
 
       if (horaFranja !== '') {
-        // Si eligió una hora (ej. '17'), filtramos estrictamente los trenes que pasan entre las 17:00 y las 17:59
         const horaInicioMinutos = Number(horaFranja) * 60;
         const horaFinMinutos = horaInicioMinutos + 59;
 
@@ -172,7 +187,6 @@ export default function AppTrenUrquiza() {
           .filter(item => item.minutoPasoTotal >= horaInicioMinutos && item.minutoPasoTotal <= horaFinMinutos)
           .sort((a, b) => a.minutoPasoTotal - b.minutoPasoTotal);
       } else {
-        // Modo en vivo: próximos 4 trenes a partir de ahora
         filtrados = todosCalculados
           .filter(item => item.minutosFaltantes >= 0)
           .sort((a, b) => a.minutosFaltantes - b.minutosFaltantes)
@@ -216,13 +230,11 @@ export default function AppTrenUrquiza() {
         overflow: 'hidden'
       }}>
         
-        {/* Franja superior tricolor estilo frente del tren */}
         <div style={{
           height: '10px',
           background: 'repeating-linear-gradient(45deg, #dc2626, #dc2626 15px, #ffffff 15px, #ffffff 30px)'
         }}></div>
 
-        {/* Encabezado amarillo ferroviario con Reloj en vivo */}
         <div style={{
           backgroundColor: '#eab308',
           color: '#0f172a',
@@ -255,7 +267,6 @@ export default function AppTrenUrquiza() {
 
         <div style={{ padding: '18px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
           
-          {/* Reporte Oficial */}
           <div style={{ 
             backgroundColor: alertaRetraso ? 'rgba(220, 38, 38, 0.15)' : '#090d16', 
             border: alertaRetraso ? '1px solid #dc2626' : '1px solid #334155', 
@@ -281,7 +292,6 @@ export default function AppTrenUrquiza() {
             </span>
           </div>
 
-          {/* Selectores de Estación */}
           <div style={{ backgroundColor: '#090d16', border: '1px solid #334155', borderRadius: '12px', padding: '14px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
             <div>
               <label style={{ fontSize: '11px', fontWeight: 800, color: '#eab308', textTransform: 'uppercase' }}>📍 Subo en estación (Origen)</label>
@@ -316,11 +326,8 @@ export default function AppTrenUrquiza() {
             </div>
           </div>
 
-          {/* DIAGRAMA ESTILO SUBTE CON TIEMPO ESTIMADO */}
           {estacionOrigen && estacionDestino && origenId !== destinoId && (() => {
-            const offsetOrg = sentidoActual === 'Lemos' ? estacionOrigen.min_desde_lacroze : estacionOrigen.min_desde_lemos;
-            const offsetDst = sentidoActual === 'Lemos' ? estacionDestino.min_desde_lacroze : estacionDestino.min_desde_lemos;
-            const tiempoTotalViaje = Math.abs(offsetDst - offsetOrg);
+            const tiempoTotalViaje = calcularTiempoViajeReal(estacionOrigen, estacionDestino, sentidoActual);
             const cantEstaciones = Math.abs(estacionDestino.orden - estacionOrigen.orden);
 
             return (
@@ -355,7 +362,6 @@ export default function AppTrenUrquiza() {
             );
           })()}
 
-          {/* Opciones de cronograma y selector de franja horaria */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
             <div style={{ backgroundColor: '#090d16', padding: '10px', borderRadius: '10px', border: '1px solid #334155' }}>
               <label style={{ fontSize: '10px', fontWeight: 800, color: '#94a3b8', textTransform: 'uppercase' }}>Cronograma</label>
@@ -396,7 +402,6 @@ export default function AppTrenUrquiza() {
             </div>
           </div>
 
-          {/* Listado de Trenes de la Franja */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '4px' }}>
             {cargando ? (
               <div style={{ padding: '20px', textAlign: 'center', fontSize: '12px', color: '#eab308', fontWeight: 700 }}>
@@ -462,7 +467,6 @@ export default function AppTrenUrquiza() {
           </div>
         </div>
 
-        {/* Franja inferior tricolor */}
         <div style={{
           height: '10px',
           background: 'repeating-linear-gradient(45deg, #dc2626, #dc2626 15px, #ffffff 15px, #ffffff 30px)'
